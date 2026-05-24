@@ -123,3 +123,19 @@ LOG_CONFIG = {
     "retention": "30 days",
     "file": str(LOGS_DIR / "rex.log"),
 }
+# Voice settings
+VOICE_CONFIG = {
+    "sample_rate": 16000,
+    "language": "en-IN",  # Change to "ta-IN" for Tamil
+}
+
+# UI Theme
+UI_CONFIG = {
+    "theme": "dark_cyber",
+    "primary_color": "#00f5ff",
+}
+
+# Smart home devices
+SMART_HOME_CONFIG = {
+    "devices": { ... }
+}
