@@ -81,6 +81,7 @@ HTML_TEMPLATE = """
             border-radius: 15px;
             max-width: 80%;
             animation: fadeIn 0.3s ease;
+            white-space: pre-wrap;
         }
         
         @keyframes fadeIn {
@@ -113,7 +114,6 @@ HTML_TEMPLATE = """
         
         .message .content {
             line-height: 1.6;
-            white-space: pre-wrap;
         }
         
         .input-area {
@@ -203,7 +203,7 @@ HTML_TEMPLATE = """
     <div class="container">
         <div class="header">
             <h1>🦖 REX AI Assistant</h1>
-            <p>Advanced AI with 20L+ Skills | Multi-language | Cross-platform</p>
+            <p>Advanced AI with 20L+ Skills | Multi-Language | Cross-Platform</p>
         </div>
         
         <div class="chat-container" id="chatContainer">
@@ -270,13 +270,15 @@ I can assist with:
                     body: JSON.stringify({message: text})
                 });
                 
+                if (!response.ok) throw new Error('Server returned ' + response.status);
+                
                 const data = await response.json();
                 typingIndicator.classList.remove('active');
                 addMessage('rex', data.response || 'No response');
                 
             } catch (error) {
                 typingIndicator.classList.remove('active');
-                addMessage('rex', 'Error: Could not connect to REX engine. Make sure the server is running.');
+                addMessage('rex', 'Error: Could not connect to REX engine. Make sure the server is running. (' + error.message + ')');
             }
         }
         
@@ -318,11 +320,12 @@ def create_web_app(engine=None):
         return render_template_string(HTML_TEMPLATE)
     
     @app.route('/api/chat', methods=['POST'])
-    async def chat():
+    def chat():  # FIXED: Changed from 'async def' to 'def' to prevent Flask 500 errors
         data = request.json
         message = data.get('message', '')
         
         if engine:
+            # Create a dedicated event loop for this request
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
@@ -333,6 +336,7 @@ def create_web_app(engine=None):
                     "data": result.get("data", {}),
                 })
             except Exception as e:
+                logger.error(f"Web chat error: {e}")
                 return jsonify({"response": f"Error: {str(e)}", "error": True})
             finally:
                 loop.close()
@@ -354,8 +358,11 @@ def run_web_server(engine=None):
     """Run the web server"""
     app = create_web_app(engine)
     if app:
+        print(f"🌐 REX Web UI ready at http://localhost:{WEB_CONFIG['port']}")
+        # threaded=True allows multiple concurrent requests without blocking
         app.run(
             host=WEB_CONFIG["host"],
             port=WEB_CONFIG["port"],
-            debug=WEB_CONFIG["debug"]
+            debug=WEB_CONFIG["debug"],
+            threaded=True
         )
