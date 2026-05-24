@@ -1,0 +1,44 @@
+{
+    "en": {
+        "name": "English",
+        "greetings": ["Hello!", "Hi there!", "Hey!", "Good day!"],
+        "farewells": ["Goodbye!", "See you later!", "Take care!", "Bye!"],
+        "confirmations": ["Sure!", "Of course!", "Absolutely!", "Done!"],
+        "errors": ["I'm sorry, I didn't understand that.", "Could you please rephrase?", "I'm having trouble with that."],
+        "prompts": {
+            "greeting": "Hello! I'm REX, your AI assistant. How can I help you today?",
+            "listening": "I'm listening...",
+            "thinking": "Let me think about that...",
+            "completed": "Task completed successfully!",
+            "error": "I encountered an error. Let me try to fix it."
+        }
+    },
+    "ta": {
+        "name": "Tamil (தமிழ்)",
+        "greetings": ["வணக்கம்!", "ஹலோ!", "வணக்கம் நண்பா!"],
+        "farewells": ["பிரியாவிடை!", "பிறகு சந்திப்போம்!", "கவனித்துக் கொள்ளுங்கள்!"],
+        "confirmations": ["நிச்சயமாக!", "கண்டிப்பாக!", "முடிந்தது!"],
+        "errors": ["மன்னிக்கவும், எனக்கு புரியவில்லை.", "மீண்டும் சொல்லுங்களேன்?", "அதில் சிரமம் உள்ளது."],
+        "prompts": {
+            "greeting": "வணக்கம்! நான் REX, உங்கள் AI உதவியாளர். இன்று நான் உங்களுக்கு எப்படி உதவ முடியும்?",
+            "listening": "நான் கேட்கிறேன்...",
+            "thinking": "அதை பற்றி யோசிக்கிறேன்...",
+            "completed": "பணி வெற்றிகரமாக முடிந்தது!",
+            "error": "ஒரு பிழை ஏற்பட்டது. சரி செய்ய முயற்சிக்கிறேன்."
+        }
+    },
+    "hi": {
+        "name": "Hindi (हिंदी)",
+        "greetings": ["नमस्ते!", "हैलो!", "नमस्कार!"],
+        "farewells": ["अलविदा!", "बाद में मिलते हैं!", "अपना ख्याल रखना!"],
+        "confirmations": ["ज़रूर!", "बिल्कुल!", "हो गया!"],
+        "errors": ["माफ़ कीजिए, मुझे समझ नहीं आया।", "क्या आप दोबारा कह सकते हैं?", "मुझे इसमें दिक्कत हो रही है।"],
+        "prompts": {
+            "greeting": "नमस्ते! मैं REX हूँ, आपका AI सहायक। आज मैं आपकी कैसे मदद कर सकता हूँ?",
+            "listening": "मैं सुन रहा हूँ...",
+            "thinking": "मुझे इसके बारे में सोचने दीजिए...",
+            "completed": "कार्य सफलतापूर्वक पूरा हुआ!",
+            "error": "एक त्रुटि हुई। मैं इसे ठीक करने की कोशिश कर रहा हूँ।"
+        }
+    }
+}
