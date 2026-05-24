@@ -3,6 +3,7 @@ REX NLP Module - Natural Language Processing
 """
 import re
 import json
+import ssl
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 from datetime import datetime
@@ -28,12 +29,6 @@ try:
     from nltk.tag import pos_tag
     from nltk.chunk import ne_chunk
     from nltk.stem import WordNetLemmatizer
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-    nltk.download('averaged_perceptron_tagger', quiet=True)
-    nltk.download('maxent_ne_chunker', quiet=True)
-    nltk.download('words', quiet=True)
-    nltk.download('wordnet', quiet=True)
 except ImportError:
     nltk = None
 
@@ -110,7 +105,8 @@ class REXNLP:
         "percentage": r"\b\d+(?:\.\d+)?%\b",
         "number": r"\b\d+(?:\.\d+)?\b",
     }
-        def __init__(self):
+
+    def __init__(self):
         self.lemmatizer = None
         self.stop_words = set()
         
@@ -133,7 +129,15 @@ class REXNLP:
         logger.info("🗣️ NLP module initialized")
 
     def _ensure_nltk_data(self):
-        """Self-healing: Automatically downloads missing NLTK datasets."""
+        """Self-healing: Auto-downloads missing NLTK datasets with SSL bypass."""
+        # SSL Bypass for restricted environments (like Windows Sandbox)
+        try:
+            _create_unverified_https_context = ssl._create_unverified_context
+        except AttributeError:
+            pass
+        else:
+            ssl._create_default_https_context = _create_unverified_https_context
+
         required_datasets = [
             ('tokenizers/punkt', 'punkt'),
             ('corpora/stopwords', 'stopwords'),
@@ -152,17 +156,7 @@ class REXNLP:
                     nltk.download(name, quiet=True)
                 except Exception as e:
                     logger.error(f"Failed to download NLTK dataset {name}: {e}")
-    def __init__(self):
-        self.lemmatizer = WordNetLemmatizer() if nltk else None
-        self.stop_words = set(stopwords.words('english')) if nltk else set()
-        self.compiled_intents = self._compile_patterns(self.INTENT_PATTERNS)
-        self.compiled_entities = self._compile_patterns(self.ENTITY_PATTERNS)
-        
-        # Load language configs
-        self.languages = self._load_languages()
-        
-        logger.info("🗣️ NLP module initialized")
-    
+
     def _compile_patterns(self, patterns: Dict) -> Dict:
         """Compile regex patterns for efficiency"""
         compiled = {}
@@ -378,3 +372,4 @@ class REXNLP:
         }
         
         return {"text": templates.get(intent, "I understand.")}
+        
