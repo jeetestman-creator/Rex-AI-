@@ -1,9 +1,11 @@
 """
 REX NLP Module - Natural Language Processing
+Self-Healing, Python 3.14+ Compatible, Sandbox-Safe
 """
 import re
 import json
 import ssl
+import os
 import warnings
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
@@ -12,10 +14,35 @@ from datetime import datetime
 import numpy as np
 from loguru import logger
 
-# Ignore Python 3.12+ strict regex syntax warnings
+# Suppress Python 3.12+ strict regex syntax warnings
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+# --- NLTK Setup & Sandbox Bypass (Based on NLTK Docs) ---
+try:
+    import nltk
+    from nltk.tokenize import word_tokenize, sent_tokenize
+    from nltk.corpus import stopwords
+    from nltk.tag import pos_tag
+    from nltk.chunk import ne_chunk
+    from nltk.stem import WordNetLemmatizer
+    
+    # 1. Create a local nltk_data folder in the project root to avoid Admin/Sandbox permission errors
+    BASE_DIR = Path(__file__).parent.parent
+    LOCAL_NLTK_DATA = BASE_DIR / "nltk_data"
+    LOCAL_NLTK_DATA.mkdir(parents=True, exist_ok=True)
+    
+    # 2. Tell NLTK to look in our local folder first
+    if str(LOCAL_NLTK_DATA) not in nltk.data.path:
+        nltk.data.path.insert(0, str(LOCAL_NLTK_DATA))
+        
+    NLTK_AVAILABLE = True
+except ImportError:
+    nltk = None
+    NLTK_AVAILABLE = False
+    logger.warning("NLTK not installed. NLP will use basic fallbacks.")
+
+# --- Optional NLP Libraries ---
 try:
     from langdetect import detect, DetectorFactory
     DetectorFactory.seed = 0
@@ -27,16 +54,6 @@ try:
 except ImportError:
     TextBlob = None
 
-try:
-    import nltk
-    from nltk.tokenize import word_tokenize, sent_tokenize
-    from nltk.corpus import stopwords
-    from nltk.tag import pos_tag
-    from nltk.chunk import ne_chunk
-    from nltk.stem import WordNetLemmatizer
-except ImportError:
-    nltk = None
-
 from config.settings import NLP_CONFIG, REX_CONFIG
 
 
@@ -45,7 +62,7 @@ class REXNLP:
     Advanced NLP Processing for REX
     """
     
-    # Intent patterns
+    # Intent patterns (Strictly sanitized for Python 3.12+ / 3.14)
     INTENT_PATTERNS = {
         "greeting": [r"\b(hello|hi|hey|good morning|good evening|good afternoon|howdy|greetings|sup|what'?s up|vanakkam|வணக்கம்|नमस्ते)\b"],
         "farewell": [r"\b(bye|goodbye|see you|farewell|take care|later|பிரியாவிடை|अलविदा)\b"],
@@ -65,7 +82,7 @@ class REXNLP:
         "gratitude": [r"\b(thank|thanks|appreciate|grateful|धन्यवाद|நன்றி)\b"],
     }
     
-    # Entity patterns (Fully sanitized for Python 3.12+)
+    # Entity patterns (Strictly sanitized)
     ENTITY_PATTERNS = {
         "email": [r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"],
         "url": [r"https?://[^\s]+|www\.[^\s]+"],
@@ -77,18 +94,43 @@ class REXNLP:
         "number": [r"\b\d+(?:\.\d+)?\b"],
     }
 
+    # Hardcoded fallback stop words in case NLTK download completely fails
+    FALLBACK_STOP_WORDS = {
+        'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', "you're", 
+        "you've", "you'll", "you'd", 'your', 'yours', 'yourself', 'yourselves', 'he', 
+        'him', 'his', 'himself', 'she', "she's", 'her', 'hers', 'herself', 'it', "it's", 
+        'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 
+        'who', 'whom', 'this', 'that', "that'll", 'these', 'those', 'am', 'is', 'are', 
+        'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 
+        'does', 'did', 'doing', 'a', 'an', 'the', 'and', 'but', 'if', 'or', 'because', 
+        'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 
+        'between', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 
+        'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 
+        'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 
+        'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 
+        'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 
+        'can', 'will', 'just', 'don', "don't", 'should', "should've", 'now', 'd', 'll', 
+        'm', 'o', 're', 've', 'y', 'ain', 'aren', "aren't", 'couldn', "couldn't", 'didn', 
+        "didn't", 'doesn', "doesn't", 'hadn', "hadn't", 'hasn', "hasn't", 'haven', 
+        "haven't", 'isn', "isn't", 'ma', 'mightn', "mightn't", 'mustn', "mustn't", 
+        'needn', "needn't", 'shan', "shan't", 'shouldn', "shouldn't", 'wasn', "wasn't", 
+        'weren', "weren't", 'won', "won't", 'wouldn', "wouldn't"
+    }
+
     def __init__(self):
         self.lemmatizer = None
         self.stop_words = set()
         
-        if nltk:
+        if NLTK_AVAILABLE:
             self._ensure_nltk_data()
             try:
                 self.lemmatizer = WordNetLemmatizer()
                 self.stop_words = set(stopwords.words('english'))
             except Exception as e:
-                logger.warning(f"⚠️ NLTK initialization warning: {e}. Using empty fallbacks.")
-                self.stop_words = set()
+                logger.warning(f"⚠️ NLTK initialization warning: {e}. Using hardcoded fallbacks.")
+                self.stop_words = self.FALLBACK_STOP_WORDS
+        else:
+            self.stop_words = self.FALLBACK_STOP_WORDS
                 
         self.compiled_intents = self._compile_patterns(self.INTENT_PATTERNS)
         self.compiled_entities = self._compile_patterns(self.ENTITY_PATTERNS)
@@ -97,7 +139,12 @@ class REXNLP:
         logger.info("🗣️ NLP module initialized")
 
     def _ensure_nltk_data(self):
-        """Self-healing: Auto-downloads missing NLTK datasets with SSL bypass."""
+        """
+        Self-healing NLTK Downloader.
+        Uses local project directory to bypass Windows Sandbox / Admin permission errors.
+        Includes SSL bypass for restricted networks.
+        """
+        # 1. SSL Bypass for restricted environments
         try:
             _create_unverified_https_context = ssl._create_unverified_context
         except AttributeError:
@@ -105,22 +152,27 @@ class REXNLP:
         else:
             ssl._create_default_https_context = _create_unverified_https_context
 
+        # 2. Required datasets (Including new punkt_tab and eng tagger)
         required_datasets = [
+            ('tokenizers/punkt_tab', 'punkt_tab'),
             ('tokenizers/punkt', 'punkt'),
             ('corpora/stopwords', 'stopwords'),
             ('taggers/averaged_perceptron_tagger', 'averaged_perceptron_tagger'),
+            ('taggers/averaged_perceptron_tagger_eng', 'averaged_perceptron_tagger_eng'),
             ('chunkers/maxent_ne_chunker', 'maxent_ne_chunker'),
             ('corpora/words', 'words'),
             ('corpora/wordnet', 'wordnet')
         ]
         
+        # 3. Check and download to LOCAL_NLTK_DATA
         for path, name in required_datasets:
             try:
                 nltk.data.find(path)
             except LookupError:
-                logger.info(f"🔄 Self-Healing: Downloading missing NLTK dataset '{name}'...")
+                logger.info(f"🔄 Self-Healing: Downloading missing NLTK dataset '{name}' to local storage...")
                 try:
-                    nltk.download(name, quiet=True)
+                    # Download specifically to our local sandbox-safe folder
+                    nltk.download(name, download_dir=str(LOCAL_NLTK_DATA), quiet=True)
                 except Exception as e:
                     logger.error(f"Failed to download NLTK dataset {name}: {e}")
 
@@ -141,8 +193,11 @@ class REXNLP:
         """Load language configurations"""
         lang_path = Path(__file__).parent.parent / "config" / "languages.json"
         if lang_path.exists():
-            with open(lang_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            try:
+                with open(lang_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
         return {}
     
     def detect_language(self, text: str) -> str:
@@ -151,7 +206,7 @@ class REXNLP:
             return "en"
         try:
             lang = detect(text)
-            return lang if lang in REX_CONFIG["supported_languages"] else "en"
+            return lang if lang in REX_CONFIG.get("supported_languages", ["en"]) else "en"
         except Exception:
             return "en"
     
@@ -168,20 +223,29 @@ class REXNLP:
         }
     
     def tokenize(self, text: str) -> List[str]:
-        if nltk: return word_tokenize(text)
+        if NLTK_AVAILABLE: 
+            try: return word_tokenize(text)
+            except Exception: pass
         return re.findall(r'\b\w+\b', text.lower())
     
     def sent_tokenize(self, text: str) -> List[str]:
-        if nltk: return sent_tokenize(text)
+        if NLTK_AVAILABLE: 
+            try: return sent_tokenize(text)
+            except Exception: pass
         return re.split(r'[.!?]+', text)
     
     def pos_tag(self, text: str) -> List[Tuple[str, str]]:
-        if nltk: return pos_tag(word_tokenize(text))
+        if NLTK_AVAILABLE: 
+            try: return pos_tag(word_tokenize(text))
+            except Exception: pass
         return []
     
     def lemmatize(self, text: str) -> List[str]:
         if not self.lemmatizer: return self.tokenize(text)
-        return [self.lemmatizer.lemmatize(token.lower()) for token in self.tokenize(text)]
+        try:
+            return [self.lemmatizer.lemmatize(token.lower()) for token in self.tokenize(text)]
+        except Exception:
+            return self.tokenize(text)
     
     def clean_text(self, text: str) -> str:
         text = re.sub(r'\s+', ' ', text).strip()
@@ -202,7 +266,12 @@ class REXNLP:
         for entity_type, patterns in self.compiled_entities.items():
             for pattern in patterns:
                 for match in pattern.findall(text):
-                    entities.append({"text": match, "type": entity_type, "start": text.find(match), "end": text.find(match) + len(match)})
+                    entities.append({
+                        "text": match, 
+                        "type": entity_type, 
+                        "start": text.find(match), 
+                        "end": text.find(match) + len(match)
+                    })
         return entities
     
     def analyze_sentiment(self, nlp_result: Dict) -> str:
