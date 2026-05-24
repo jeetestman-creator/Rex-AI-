@@ -40,7 +40,7 @@ class REXNLP:
     Advanced NLP Processing for REX
     """
     
-    # Intent patterns
+    # Intent patterns (Fixed invalid escapes for Python 3.12+)
     INTENT_PATTERNS = {
         "greeting": [
             r"\b(hello|hi|hey|good morning|good evening|good afternoon|howdy|greetings|sup|what'?s up|vanakkam|வணக்கம்|नमस्ते)\b",
@@ -84,7 +84,7 @@ class REXNLP:
         ],
         "math": [
             r"\b(calculate|compute|solve|equation|formula|math|add|subtract|multiply|divide)\b",
-            r"\d+\s*[\+\-\*\/\^]\s*\d+",
+            r"\d+\s*[-+*/^]\s*\d+",  # FIXED: Removed invalid escapes \+ \- \* \/ \^
         ],
         "self_improvement": [
             r"\b(learn|improve|upgrade|update|new skill|add capability)\b",
@@ -94,12 +94,12 @@ class REXNLP:
         ],
     }
     
-    # Entity patterns
+    # Entity patterns (Fixed invalid escapes for Python 3.12+)
     ENTITY_PATTERNS = {
-        "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
         "url": r"https?://[^\s]+|www\.[^\s]+",
         "phone": r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",
-        "date": r"\b\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b",
+        "date": r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",  # FIXED: Removed invalid escape \-
         "time": r"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b",
         "money": r"\$[\d,]+(?:\.\d{2})?|₹[\d,]+(?:\.\d{2})?|\d+\s*(?:dollars|rupees|euros|USD|INR)",
         "percentage": r"\b\d+(?:\.\d+)?%\b",
@@ -158,10 +158,16 @@ class REXNLP:
                     logger.error(f"Failed to download NLTK dataset {name}: {e}")
 
     def _compile_patterns(self, patterns: Dict) -> Dict:
-        """Compile regex patterns for efficiency"""
+        """Compile regex patterns for efficiency with self-healing for bad patterns."""
         compiled = {}
         for category, pattern_list in patterns.items():
-            compiled[category] = [re.compile(p, re.IGNORECASE) for p in pattern_list]
+            compiled[category] = []
+            for p in pattern_list:
+                try:
+                    compiled[category].append(re.compile(p, re.IGNORECASE))
+                except re.error as e:
+                    # Self-Healing: If a regex pattern is invalid, log it and skip instead of crashing
+                    logger.warning(f"⚠️ Failed to compile regex pattern '{p}' in category '{category}': {e}")
         return compiled
     
     def _load_languages(self) -> Dict:
@@ -372,4 +378,3 @@ class REXNLP:
         }
         
         return {"text": templates.get(intent, "I understand.")}
-        
