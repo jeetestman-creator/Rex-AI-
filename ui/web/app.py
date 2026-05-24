@@ -1,8 +1,10 @@
 """
-REX Web Interface - JARVIS-Style Holographic UI
+REX Web Interface - Ultimate JARVIS 3D Holographic UI
 """
 import json
 import asyncio
+import time
+import platform
 from typing import Dict
 
 from loguru import logger
@@ -14,8 +16,17 @@ try:
 except ImportError:
     FLASK_AVAILABLE = False
 
-from config.settings import WEB_CONFIG
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+    START_TIME = time.time()
+    prev_net = psutil.net_io_counters()
+    prev_time = time.time()
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    logger.warning("psutil not installed. System telemetry will be simulated.")
 
+from config.settings import WEB_CONFIG
 
 HTML_TEMPLATE = r"""
 <!DOCTYPE html>
@@ -23,530 +34,298 @@ HTML_TEMPLATE = r"""
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>R.E.X // Tactical AI Interface</title>
+<title>R.E.X // J.A.R.V.I.S. Interface</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
     :root {
-        --jarvis-cyan: #00d4ff;
-        --jarvis-cyan-dim: #00a0cc;
+        --jarvis-cyan: #00f3ff;
         --jarvis-blue: #0066ff;
-        --jarvis-bg: #000814;
-        --jarvis-panel: rgba(0, 30, 60, 0.35);
-        --jarvis-border: rgba(0, 212, 255, 0.4);
-        --jarvis-text: #a8e6ff;
-        --jarvis-warning: #ffaa00;
-        --jarvis-danger: #ff3860;
-        --jarvis-success: #00ff9d;
+        --jarvis-gold: #ffaa00;
+        --jarvis-bg: #020611;
+        --panel-bg: rgba(0, 20, 40, 0.4);
+        --border-glow: rgba(0, 243, 255, 0.6);
+        --text-main: #a8e6ff;
+        --text-dim: #4a7c99;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
-    html, body {
+    body {
         background: var(--jarvis-bg);
-        color: var(--jarvis-text);
-        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        color: var(--text-main);
+        font-family: 'Share Tech Mono', monospace;
         overflow: hidden;
         height: 100vh;
-        cursor: crosshair;
+        width: 100vw;
     }
 
-    /* === Animated Background Grid === */
+    /* 3D Canvas Background */
+    #three-container {
+        position: fixed;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        z-index: 0;
+    }
+
+    /* Cinematic Grid & Vignette */
     body::before {
         content: '';
         position: fixed;
         inset: 0;
-        background-image:
-            linear-gradient(rgba(0, 212, 255, 0.04) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0, 212, 255, 0.04) 1px, transparent 1px);
-        background-size: 40px 40px;
-        z-index: 0;
-        animation: gridPulse 8s ease-in-out infinite;
+        background: 
+            radial-gradient(circle at 50% 50%, transparent 0%, rgba(2, 6, 17, 0.8) 100%),
+            linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+        background-size: 100% 100%, 40px 40px, 40px 40px;
+        z-index: 1;
+        pointer-events: none;
     }
 
-    @keyframes gridPulse {
-        0%, 100% { opacity: 0.6; }
-        50% { opacity: 1; }
-    }
-
-    /* === Scanning Line === */
-    body::after {
-        content: '';
-        position: fixed;
-        top: 0; left: 0; right: 0;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, var(--jarvis-cyan), transparent);
-        box-shadow: 0 0 20px var(--jarvis-cyan);
-        z-index: 100;
-        animation: scanLine 4s linear infinite;
-    }
-
-    @keyframes scanLine {
-        0% { transform: translateY(0); opacity: 0; }
-        10% { opacity: 1; }
-        90% { opacity: 1; }
-        100% { transform: translateY(100vh); opacity: 0; }
-    }
-
-    /* === Boot Sequence === */
-    #bootScreen {
+    /* HUD Overlay */
+    .hud {
         position: fixed;
         inset: 0;
-        background: #000;
-        z-index: 9999;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-        color: var(--jarvis-cyan);
-        font-family: 'Consolas', monospace;
-        transition: opacity 1s;
-    }
-
-    #bootScreen.hidden { opacity: 0; pointer-events: none; }
-
-    .boot-text {
-        font-size: 14px;
-        text-align: left;
-        max-width: 600px;
-        line-height: 1.8;
-        text-shadow: 0 0 10px var(--jarvis-cyan);
-    }
-
-    .boot-text .line { opacity: 0; animation: bootLine 0.1s forwards; }
-
-    @keyframes bootLine { to { opacity: 1; } }
-
-    /* === Main Layout === */
-    .jarvis-container {
-        position: relative;
-        z-index: 1;
+        z-index: 10;
         display: grid;
-        grid-template-columns: 280px 1fr 280px;
-        grid-template-rows: 60px 1fr 180px;
-        gap: 15px;
-        padding: 15px;
-        height: 100vh;
-    }
-
-    /* === Top Bar === */
-    .top-bar {
-        grid-column: 1 / -1;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 25px;
-        background: var(--jarvis-panel);
-        border: 1px solid var(--jarvis-border);
-        border-radius: 2px;
-        backdrop-filter: blur(10px);
-        position: relative;
-    }
-
-    .top-bar::before, .top-bar::after {
-        content: '';
-        position: absolute;
-        width: 20px;
-        height: 20px;
-        border: 2px solid var(--jarvis-cyan);
-    }
-    .top-bar::before { top: -2px; left: -2px; border-right: none; border-bottom: none; }
-    .top-bar::after { top: -2px; right: -2px; border-left: none; border-bottom: none; }
-
-    .logo {
-        font-size: 22px;
-        font-weight: bold;
-        letter-spacing: 4px;
-        color: var(--jarvis-cyan);
-        text-shadow: 0 0 15px var(--jarvis-cyan);
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }
-
-    .logo-hex {
-        width: 30px;
-        height: 30px;
-        background: var(--jarvis-cyan);
-        clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: #000;
-        font-weight: 900;
-        font-size: 14px;
-        box-shadow: 0 0 20px var(--jarvis-cyan);
-        animation: hexPulse 2s ease-in-out infinite;
-    }
-
-    @keyframes hexPulse {
-        0%, 100% { box-shadow: 0 0 20px var(--jarvis-cyan); }
-        50% { box-shadow: 0 0 35px var(--jarvis-cyan), 0 0 50px var(--jarvis-cyan); }
-    }
-
-    .status-group {
-        display: flex;
+        grid-template-areas: 
+            "top top top"
+            "left center right"
+            "bottom bottom bottom";
+        grid-template-columns: 320px 1fr 320px;
+        grid-template-rows: 80px 1fr 280px;
         gap: 20px;
-        font-size: 11px;
-        letter-spacing: 1.5px;
+        padding: 20px;
+        pointer-events: none;
     }
 
-    .status-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
+    .hud > * { pointer-events: auto; }
 
-    .status-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--jarvis-success);
-        box-shadow: 0 0 10px var(--jarvis-success);
-        animation: blink 2s infinite;
-    }
-
-    @keyframes blink {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.3; }
-    }
-
-    .time-display {
-        color: var(--jarvis-cyan);
-        font-size: 13px;
-        letter-spacing: 2px;
-        text-shadow: 0 0 10px var(--jarvis-cyan);
-    }
-
-    /* === Side Panels === */
+    /* Glassmorphism Panels */
     .panel {
-        background: var(--jarvis-panel);
-        border: 1px solid var(--jarvis-border);
-        backdrop-filter: blur(10px);
-        padding: 15px;
-        overflow-y: auto;
+        background: var(--panel-bg);
+        border: 1px solid var(--border-glow);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 0 20px rgba(0, 243, 255, 0.1), inset 0 0 20px rgba(0, 243, 255, 0.05);
         position: relative;
+        overflow: hidden;
     }
 
     .panel::before {
         content: '';
         position: absolute;
-        top: 0; left: 0;
-        width: 30px; height: 2px;
-        background: var(--jarvis-cyan);
-        box-shadow: 0 0 10px var(--jarvis-cyan);
+        top: 0; left: 0; right: 0;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, var(--jarvis-cyan), transparent);
     }
 
     .panel-title {
-        font-size: 10px;
+        font-family: 'Orbitron', sans-serif;
+        font-size: 12px;
         letter-spacing: 3px;
         color: var(--jarvis-cyan);
+        padding: 15px;
+        border-bottom: 1px solid rgba(0, 243, 255, 0.2);
         text-transform: uppercase;
-        margin-bottom: 15px;
-        padding-bottom: 8px;
-        border-bottom: 1px dashed var(--jarvis-border);
         display: flex;
         justify-content: space-between;
+        align-items: center;
     }
 
     .panel-title::after {
-        content: '▮';
-        animation: blink 1s infinite;
+        content: '◉';
+        color: var(--jarvis-gold);
+        animation: blink 2s infinite;
     }
 
-    .stat-row {
+    /* Top Bar */
+    .top-bar {
+        grid-area: top;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 30px;
+        background: var(--panel-bg);
+        border-bottom: 1px solid var(--border-glow);
+        backdrop-filter: blur(10px);
+    }
+
+    .logo {
+        font-family: 'Orbitron', sans-serif;
+        font-size: 28px;
+        font-weight: 900;
+        color: var(--jarvis-cyan);
+        text-shadow: 0 0 15px var(--jarvis-cyan);
+        letter-spacing: 5px;
+    }
+
+    .status-group {
+        display: flex;
+        gap: 30px;
+        font-size: 12px;
+        letter-spacing: 2px;
+    }
+
+    .status-item { display: flex; align-items: center; gap: 10px; }
+    .status-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--jarvis-cyan);
+        box-shadow: 0 0 10px var(--jarvis-cyan);
+        animation: pulse 2s infinite;
+    }
+
+    /* Left Panel: Telemetry */
+    .left-panel { grid-area: left; padding-bottom: 20px; }
+    
+    .metric {
+        padding: 15px;
+        border-bottom: 1px solid rgba(0, 243, 255, 0.1);
+    }
+    
+    .metric-header {
         display: flex;
         justify-content: space-between;
-        padding: 8px 0;
         font-size: 11px;
-        border-bottom: 1px dotted rgba(0, 212, 255, 0.15);
+        letter-spacing: 2px;
+        margin-bottom: 8px;
+        color: var(--text-dim);
+    }
+    
+    .metric-val { color: var(--jarvis-cyan); font-weight: bold; font-size: 14px; }
+    
+    .bar-bg {
+        height: 4px;
+        background: rgba(0, 243, 255, 0.1);
+        border-radius: 2px;
+        overflow: hidden;
+    }
+    
+    .bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--jarvis-blue), var(--jarvis-cyan));
+        box-shadow: 0 0 10px var(--jarvis-cyan);
+        transition: width 0.5s ease-out;
     }
 
-    .stat-label { color: rgba(168, 230, 255, 0.6); letter-spacing: 1px; }
-    .stat-value { color: var(--jarvis-cyan); font-weight: bold; }
-
-    .skill-list {
-        list-style: none;
-        font-size: 11px;
-    }
-
-    .skill-list li {
-        padding: 6px 0;
-        padding-left: 15px;
-        position: relative;
-        color: rgba(168, 230, 255, 0.8);
-        transition: all 0.2s;
-    }
-
-    .skill-list li::before {
-        content: '▸';
-        position: absolute;
-        left: 0;
-        color: var(--jarvis-cyan);
-    }
-
-    .skill-list li:hover {
-        color: var(--jarvis-cyan);
-        padding-left: 20px;
-        text-shadow: 0 0 5px var(--jarvis-cyan);
-    }
-
-    /* === Center: JARVIS Orb === */
-    .orb-container {
+    /* Right Panel: Radar & Memory */
+    .right-panel { grid-area: right; display: flex; flex-direction: column; }
+    
+    .radar-container {
+        flex: 1;
         display: flex;
         align-items: center;
         justify-content: center;
         position: relative;
+        padding: 20px;
     }
-
-    .jarvis-orb {
-        position: relative;
-        width: 400px;
-        height: 400px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    /* Rotating rings */
-    .ring {
-        position: absolute;
+    
+    .radar {
+        width: 200px; height: 200px;
         border-radius: 50%;
-        border: 1px solid var(--jarvis-cyan);
-    }
-
-    .ring-1 {
-        width: 400px; height: 400px;
-        border-style: dashed;
-        border-color: rgba(0, 212, 255, 0.3);
-        animation: rotate 30s linear infinite;
-    }
-
-    .ring-2 {
-        width: 340px; height: 340px;
-        border-width: 2px;
-        border-top-color: var(--jarvis-cyan);
-        border-right-color: transparent;
-        border-bottom-color: transparent;
-        border-left-color: var(--jarvis-cyan);
-        animation: rotate 15s linear infinite reverse;
-        box-shadow: 0 0 20px rgba(0, 212, 255, 0.4);
-    }
-
-    .ring-3 {
-        width: 280px; height: 280px;
-        border-style: dotted;
-        animation: rotate 20s linear infinite;
-    }
-
-    .ring-4 {
-        width: 220px; height: 220px;
-        border: 2px solid transparent;
-        border-top: 2px solid var(--jarvis-cyan);
-        animation: rotate 8s linear infinite;
-    }
-
-    @keyframes rotate {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-    }
-
-    /* Central Arc Reactor */
-    .arc-reactor {
-        width: 160px;
-        height: 160px;
-        border-radius: 50%;
-        background: radial-gradient(circle, 
-            rgba(0, 212, 255, 0.9) 0%, 
-            rgba(0, 150, 200, 0.6) 30%, 
-            rgba(0, 50, 100, 0.3) 60%, 
-            transparent 100%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        border: 1px solid var(--border-glow);
         position: relative;
-        z-index: 5;
-        cursor: pointer;
-        transition: transform 0.3s;
-        animation: reactorPulse 3s ease-in-out infinite;
+        background: radial-gradient(circle, rgba(0,243,255,0.05) 0%, transparent 70%);
     }
-
-    .arc-reactor:hover { transform: scale(1.05); }
-
-    .arc-reactor.active {
-        animation: reactorActive 0.5s ease-in-out infinite;
-    }
-
-    @keyframes reactorPulse {
-        0%, 100% { 
-            box-shadow: 0 0 40px var(--jarvis-cyan), 
-                        inset 0 0 30px rgba(0, 212, 255, 0.5);
-        }
-        50% { 
-            box-shadow: 0 0 80px var(--jarvis-cyan), 
-                        0 0 120px rgba(0, 212, 255, 0.4),
-                        inset 0 0 50px rgba(0, 212, 255, 0.8);
-        }
-    }
-
-    @keyframes reactorActive {
-        0%, 100% { transform: scale(1); }
-        50% { transform: scale(1.1); }
-    }
-
-    .arc-reactor::before {
+    
+    .radar::before {
         content: '';
         position: absolute;
-        width: 100px; height: 100px;
-        border: 2px solid rgba(255, 255, 255, 0.6);
+        inset: 0;
+        border-radius: 50%;
+        background: conic-gradient(from 0deg, transparent 0deg, rgba(0,243,255,0.4) 45deg, transparent 90deg);
+        animation: sweep 3s linear infinite;
+    }
+    
+    .radar-ring {
+        position: absolute;
+        border: 1px solid rgba(0,243,255,0.3);
         border-radius: 50%;
     }
-
-    .arc-reactor::after {
-        content: 'R';
-        font-size: 40px;
-        font-weight: 900;
-        color: #fff;
-        text-shadow: 0 0 20px #fff;
-        letter-spacing: 2px;
+    .radar-ring.r1 { inset: 25%; }
+    .radar-ring.r2 { inset: 50%; }
+    .radar-cross {
+        position: absolute; inset: 0;
+        background: linear-gradient(transparent 49.5%, rgba(0,243,255,0.3) 49.5%, rgba(0,243,255,0.3) 50.5%, transparent 50.5%),
+                    linear-gradient(90deg, transparent 49.5%, rgba(0,243,255,0.3) 49.5%, rgba(0,243,255,0.3) 50.5%, transparent 50.5%);
     }
 
-    /* Floating data labels around orb */
-    .data-label {
-        position: absolute;
-        font-size: 10px;
-        letter-spacing: 2px;
-        color: var(--jarvis-cyan);
-        padding: 3px 8px;
-        border: 1px solid var(--jarvis-border);
-        background: rgba(0, 30, 60, 0.5);
-        text-transform: uppercase;
-    }
+    /* Center: Empty for 3D Core to show through */
+    .center-area { grid-area: center; pointer-events: none; }
 
-    .data-label.tl { top: 20px; left: 20px; }
-    .data-label.tr { top: 20px; right: 20px; }
-    .data-label.bl { bottom: 20px; left: 20px; }
-    .data-label.br { bottom: 20px; right: 20px; }
-
-    /* Waveform canvas */
-    #waveform {
-        position: absolute;
-        bottom: 30px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 500px;
-        height: 40px;
-    }
-
-    /* === Chat Panel (Bottom) === */
-    .chat-panel {
-        grid-column: 1 / -1;
-        background: var(--jarvis-panel);
-        border: 1px solid var(--jarvis-border);
-        backdrop-filter: blur(10px);
+    /* Bottom: Chat Terminal */
+    .chat-terminal {
+        grid-area: bottom;
         display: flex;
         flex-direction: column;
-        position: relative;
-        overflow: hidden;
+        border-top: 2px solid var(--jarvis-cyan);
     }
 
     .chat-header {
-        padding: 8px 20px;
-        border-bottom: 1px solid var(--jarvis-border);
-        font-size: 10px;
+        padding: 10px 20px;
+        background: rgba(0, 243, 255, 0.05);
+        font-family: 'Orbitron', sans-serif;
+        font-size: 11px;
         letter-spacing: 3px;
-        color: var(--jarvis-cyan);
         display: flex;
         justify-content: space-between;
+        color: var(--jarvis-cyan);
     }
 
-    .chat-messages {
+    .chat-log {
         flex: 1;
         overflow-y: auto;
-        padding: 10px 20px;
+        padding: 15px 20px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
-    }
-
-    .chat-messages::-webkit-scrollbar { width: 4px; }
-    .chat-messages::-webkit-scrollbar-track { background: transparent; }
-    .chat-messages::-webkit-scrollbar-thumb { background: var(--jarvis-cyan); }
-
-    .msg {
-        display: flex;
-        gap: 12px;
-        font-size: 12px;
-        line-height: 1.5;
-        animation: msgSlide 0.4s ease-out;
-        white-space: pre-wrap;
-        word-break: break-word;
-    }
-
-    @keyframes msgSlide {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-
-    .msg-user .msg-prefix { color: var(--jarvis-warning); }
-    .msg-rex .msg-prefix { color: var(--jarvis-cyan); text-shadow: 0 0 8px var(--jarvis-cyan); }
-    .msg-error .msg-prefix { color: var(--jarvis-danger); }
-
-    .msg-prefix {
-        font-weight: bold;
-        min-width: 80px;
-        letter-spacing: 1px;
-    }
-
-    .msg-content {
-        color: rgba(168, 230, 255, 0.9);
-        flex: 1;
-    }
-
-    .chat-input-row {
-        display: flex;
         gap: 10px;
-        padding: 10px 20px;
-        border-top: 1px solid var(--jarvis-border);
-        background: rgba(0, 10, 25, 0.5);
+        font-size: 14px;
+        line-height: 1.6;
     }
 
-    .prompt-symbol {
-        color: var(--jarvis-cyan);
-        font-weight: bold;
-        padding: 10px 0;
-        text-shadow: 0 0 8px var(--jarvis-cyan);
+    .chat-log::-webkit-scrollbar { width: 4px; }
+    .chat-log::-webkit-scrollbar-thumb { background: var(--jarvis-cyan); }
+
+    .msg { display: flex; gap: 15px; animation: slideUp 0.4s ease-out; }
+    .msg-user .prefix { color: var(--jarvis-gold); }
+    .msg-rex .prefix { color: var(--jarvis-cyan); text-shadow: 0 0 8px var(--jarvis-cyan); }
+    .msg-error .prefix { color: #ff3860; }
+    .prefix { font-weight: bold; min-width: 80px; }
+    .content { color: rgba(255,255,255,0.9); white-space: pre-wrap; word-break: break-word; }
+
+    .input-row {
+        display: flex;
+        padding: 15px 20px;
+        background: rgba(0, 0, 0, 0.4);
+        border-top: 1px solid rgba(0, 243, 255, 0.2);
+        gap: 15px;
     }
+
+    .prompt { color: var(--jarvis-cyan); font-weight: bold; font-size: 18px; }
 
     .chat-input {
         flex: 1;
         background: transparent;
         border: none;
         outline: none;
-        color: var(--jarvis-text);
+        color: #fff;
         font-family: inherit;
-        font-size: 13px;
+        font-size: 16px;
         letter-spacing: 1px;
-        padding: 10px 0;
-    }
-
-    .chat-input::placeholder {
-        color: rgba(168, 230, 255, 0.3);
-        letter-spacing: 2px;
     }
 
     .btn-jarvis {
         background: transparent;
         border: 1px solid var(--jarvis-cyan);
         color: var(--jarvis-cyan);
-        padding: 8px 20px;
-        font-family: inherit;
-        font-size: 11px;
+        padding: 8px 25px;
+        font-family: 'Orbitron', sans-serif;
+        font-size: 12px;
         letter-spacing: 2px;
         cursor: pointer;
         text-transform: uppercase;
-        transition: all 0.2s;
+        transition: all 0.3s;
         clip-path: polygon(10% 0%, 100% 0%, 90% 100%, 0% 100%);
-        padding-left: 25px;
-        padding-right: 25px;
     }
 
     .btn-jarvis:hover {
@@ -555,379 +334,300 @@ HTML_TEMPLATE = r"""
         box-shadow: 0 0 20px var(--jarvis-cyan);
     }
 
-    .btn-mic {
-        width: 40px;
-        clip-path: none;
-        padding: 0;
-        font-size: 16px;
-    }
-
-    /* Typing indicator */
-    .typing {
-        display: none;
-        padding: 0 20px 10px;
-        font-size: 11px;
-        color: var(--jarvis-cyan);
-        letter-spacing: 2px;
-    }
-
-    .typing.active { display: block; }
-
-    .typing span {
-        animation: typeDot 1.4s infinite;
-        display: inline-block;
-    }
-    .typing span:nth-child(2) { animation-delay: 0.2s; }
-    .typing span:nth-child(3) { animation-delay: 0.4s; }
-
-    @keyframes typeDot {
-        0%, 60%, 100% { opacity: 0.2; }
-        30% { opacity: 1; }
-    }
-
-    /* Corner decorations */
-    .corner {
-        position: fixed;
-        width: 40px;
-        height: 40px;
-        border: 2px solid var(--jarvis-cyan);
-        z-index: 50;
-        pointer-events: none;
-    }
-    .corner.tl { top: 10px; left: 10px; border-right: none; border-bottom: none; }
-    .corner.tr { top: 10px; right: 10px; border-left: none; border-bottom: none; }
-    .corner.bl { bottom: 10px; left: 10px; border-right: none; border-top: none; }
-    .corner.br { bottom: 10px; right: 10px; border-left: none; border-top: none; }
+    /* Animations */
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+    @keyframes sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
 
     /* Responsive */
     @media (max-width: 1100px) {
-        .jarvis-container {
-            grid-template-columns: 1fr;
-            grid-template-rows: 60px auto 1fr 180px;
-        }
-        .panel.left, .panel.right { display: none; }
-        .jarvis-orb { width: 300px; height: 300px; }
-        .ring-1 { width: 300px; height: 300px; }
-        .ring-2 { width: 250px; height: 250px; }
-        .ring-3 { width: 200px; height: 200px; }
-        .ring-4 { width: 160px; height: 160px; }
-        .arc-reactor { width: 120px; height: 120px; }
+        .hud { grid-template-columns: 1fr; grid-template-rows: 60px 1fr 250px; }
+        .left-panel, .right-panel { display: none; }
     }
 </style>
 </head>
 <body>
 
-<!-- Boot Sequence -->
-<div id="bootScreen">
-    <div class="boot-text" id="bootText"></div>
-</div>
+<div id="three-container"></div>
 
-<!-- Corner decorations -->
-<div class="corner tl"></div>
-<div class="corner tr"></div>
-<div class="corner bl"></div>
-<div class="corner br"></div>
-
-<div class="jarvis-container">
-
+<div class="hud">
     <!-- Top Bar -->
     <div class="top-bar">
-        <div class="logo">
-            <div class="logo-hex">R</div>
-            <span>R.E.X // TACTICAL AI</span>
-        </div>
+        <div class="logo">R.E.X</div>
         <div class="status-group">
-            <div class="status-item">
-                <div class="status-dot"></div>
-                <span>SYSTEM ONLINE</span>
-            </div>
-            <div class="status-item">
-                <div class="status-dot" style="background: var(--jarvis-cyan); box-shadow: 0 0 10px var(--jarvis-cyan);"></div>
-                <span>NEURAL LINK</span>
-            </div>
-            <div class="status-item">
-                <div class="status-dot" style="background: var(--jarvis-success); box-shadow: 0 0 10px var(--jarvis-success);"></div>
-                <span id="skillCount">SKILLS: 24</span>
+            <div class="status-item"><div class="status-dot"></div> NEURAL LINK</div>
+            <div class="status-item"><div class="status-dot" style="background: var(--jarvis-gold); box-shadow: 0 0 10px var(--jarvis-gold);"></div> <span id="skill-count">24</span> MODULES</div>
+            <div class="status-item" id="clock">00:00:00</div>
+        </div>
+    </div>
+
+    <!-- Left Panel: Telemetry -->
+    <div class="panel left-panel">
+        <div class="panel-title"><span>Hardware Telemetry</span></div>
+        
+        <div class="metric">
+            <div class="metric-header"><span>CPU LOAD</span><span class="metric-val" id="cpu-val">--%</span></div>
+            <div class="bar-bg"><div class="bar-fill" id="cpu-bar" style="width: 0%"></div></div>
+        </div>
+        
+        <div class="metric">
+            <div class="metric-header"><span>MEMORY ALLOCATION</span><span class="metric-val" id="ram-val">--%</span></div>
+            <div class="bar-bg"><div class="bar-fill" id="ram-bar" style="width: 0%"></div></div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-header"><span>DISK I/O</span><span class="metric-val" id="disk-val">--%</span></div>
+            <div class="bar-bg"><div class="bar-fill" id="disk-bar" style="width: 0%"></div></div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-header"><span>UPLINK (DOWN)</span><span class="metric-val" id="net-down">-- KB/s</span></div>
+            <div class="metric-header" style="margin-top:10px;"><span>UPLINK (UP)</span><span class="metric-val" id="net-up">-- KB/s</span></div>
+        </div>
+
+        <div class="metric">
+            <div class="metric-header"><span>SYSTEM UPTIME</span><span class="metric-val" id="uptime">00:00:00</span></div>
+        </div>
+    </div>
+
+    <!-- Center (Empty for 3D) -->
+    <div class="center-area"></div>
+
+    <!-- Right Panel: Radar -->
+    <div class="panel right-panel">
+        <div class="panel-title"><span>Neural Network Scan</span></div>
+        <div class="radar-container">
+            <div class="radar">
+                <div class="radar-ring r1"></div>
+                <div class="radar-ring r2"></div>
+                <div class="radar-cross"></div>
             </div>
         </div>
-        <div class="time-display" id="timeDisplay">--:--:--</div>
-    </div>
-
-    <!-- Left Panel: System Status -->
-    <div class="panel left">
-        <div class="panel-title"><span>SYSTEM STATUS</span></div>
-        <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value" id="cpuVal">--</span></div>
-        <div class="stat-row"><span class="stat-label">MEMORY</span><span class="stat-value" id="memVal">--</span></div>
-        <div class="stat-row"><span class="stat-label">UPTIME</span><span class="stat-value" id="uptimeVal">--</span></div>
-        <div class="stat-row"><span class="stat-label">SESSIONS</span><span class="stat-value">1</span></div>
-        <div class="stat-row"><span class="stat-label">HEALTH</span><span class="stat-value" style="color: var(--jarvis-success);">100%</span></div>
-
-        <div class="panel-title" style="margin-top: 20px;"><span>MEMORY CORE</span></div>
-        <div class="stat-row"><span class="stat-label">EPISODIC</span><span class="stat-value" id="epiVal">0</span></div>
-        <div class="stat-row"><span class="stat-label">SEMANTIC</span><span class="stat-value" id="semVal">0</span></div>
-        <div class="stat-row"><span class="stat-label">KNOWLEDGE</span><span class="stat-value" id="kgVal">0</span></div>
-    </div>
-
-    <!-- Center: Orb + Chat is below -->
-    <div class="orb-container">
-        <div class="jarvis-orb">
-            <div class="ring ring-1"></div>
-            <div class="ring ring-2"></div>
-            <div class="ring ring-3"></div>
-            <div class="ring ring-4"></div>
-            <div class="arc-reactor" id="arcReactor" title="Click to activate voice"></div>
-            <div class="data-label tl">LAT 13.0827°N</div>
-            <div class="data-label tr">SEC: ALPHA</div>
-            <div class="data-label bl">FREQ: 2.4GHz</div>
-            <div class="data-label br">v1.0.0</div>
+        <div class="panel-title" style="border-top: 1px solid rgba(0,243,255,0.2); border-bottom: none;"><span>Memory Nodes</span></div>
+        <div style="padding: 15px; font-size: 12px; color: var(--text-dim);">
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px;"><span>Episodic</span><span id="mem-epi" style="color:var(--jarvis-cyan)">0</span></div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px;"><span>Semantic</span><span id="mem-sem" style="color:var(--jarvis-cyan)">0</span></div>
+            <div style="display:flex; justify-content:space-between;"><span>Knowledge Graph</span><span id="mem-kg" style="color:var(--jarvis-cyan)">0</span></div>
         </div>
-        <canvas id="waveform"></canvas>
     </div>
 
-    <!-- Right Panel: Skills -->
-    <div class="panel right">
-        <div class="panel-title"><span>ACTIVE MODULES</span></div>
-        <ul class="skill-list">
-            <li>Neural NLP Core</li>
-            <li>Voice Recognition</li>
-            <li>Knowledge Graph</li>
-            <li>Code Generation</li>
-            <li>Financial Analysis</li>
-            <li>Smart Home IoT</li>
-            <li>Cyber Defense</li>
-            <li>Ethical Hacking</li>
-            <li>Web Intelligence</li>
-            <li>Media Synthesis</li>
-            <li>Self-Healing</li>
-            <li>Self-Improvement</li>
-        </ul>
-
-        <div class="panel-title" style="margin-top: 20px;"><span>NETWORK</span></div>
-        <div class="stat-row"><span class="stat-label">IN</span><span class="stat-value" id="netIn">0 KB/s</span></div>
-        <div class="stat-row"><span class="stat-label">OUT</span><span class="stat-value" id="netOut">0 KB/s</span></div>
-        <div class="stat-row"><span class="stat-label">PING</span><span class="stat-value" id="pingVal">-- ms</span></div>
-    </div>
-
-    <!-- Chat Panel -->
-    <div class="chat-panel">
+    <!-- Bottom Chat Terminal -->
+    <div class="panel chat-terminal">
         <div class="chat-header">
-            <span>◈ COMM TERMINAL // ENCRYPTED CHANNEL</span>
-            <span id="intentDisplay">AWAITING INPUT</span>
+            <span>◈ SECURE COMM TERMINAL</span>
+            <span id="intent-display">AWAITING INPUT</span>
         </div>
-        <div class="chat-messages" id="chatMessages">
+        <div class="chat-log" id="chat-log">
             <div class="msg msg-rex">
-                <span class="msg-prefix">[R.E.X]&gt;</span>
-                <span class="msg-content">System initialized. All modules operational. How may I assist you, sir?</span>
+                <span class="prefix">[R.E.X]</span>
+                <span class="content">System initialized. 3D Holographic Interface online. How may I assist you, sir?</span>
             </div>
         </div>
-        <div class="typing" id="typing">
-            <span>PROCESSING</span><span>.</span><span>.</span><span>.</span>
-        </div>
-        <div class="chat-input-row">
-            <span class="prompt-symbol">&gt;_</span>
-            <input type="text" class="chat-input" id="userInput" 
-                   placeholder="ENTER COMMAND..." autocomplete="off"
-                   onkeypress="if(event.key==='Enter')sendMessage()">
-            <button class="btn-jarvis btn-mic" onclick="startVoice()" title="Voice">🎤</button>
+        <div class="input-row">
+            <span class="prompt">&gt;_</span>
+            <input type="text" class="chat-input" id="user-input" placeholder="ENTER COMMAND..." autocomplete="off" onkeypress="if(event.key==='Enter')sendMessage()">
+            <button class="btn-jarvis" onclick="startVoice()">🎤 VOICE</button>
             <button class="btn-jarvis" onclick="sendMessage()">TRANSMIT</button>
         </div>
     </div>
-
 </div>
 
 <script>
-// === Boot Sequence ===
-const bootLines = [
-    '> STARK INDUSTRIES SECURE OS v1.0.0',
-    '> Initializing R.E.X Neural Core...',
-    '> Loading NLP modules... [OK]',
-    '> Calibrating voice synthesis... [OK]',
-    '> Establishing knowledge graph... [OK]',
-    '> Activating 24 skill modules... [OK]',
-    '> Self-healing protocols: ARMED',
-    '> Security guardrails: ENGAGED',
-    '> Tactical AI online.',
-    '> Welcome back, sir.'
-];
+    // === THREE.JS 3D HOLOGRAPHIC CORE ===
+    let scene, camera, renderer, core, ring1, ring2, ring3;
+    let targetScale = 1;
+    let targetColor = new THREE.Color(0x00f3ff);
+    let material;
 
-const bootText = document.getElementById('bootText');
-bootLines.forEach((line, i) => {
-    setTimeout(() => {
-        const div = document.createElement('div');
-        div.className = 'line';
-        div.textContent = line;
-        div.style.animationDelay = '0s';
-        bootText.appendChild(div);
-        if (i === bootLines.length - 1) {
-            setTimeout(() => {
-                document.getElementById('bootScreen').classList.add('hidden');
-            }, 800);
+    function initThree() {
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.getElementById('three-container').appendChild(renderer.domElement);
+
+        // Particle Core
+        const particles = 3000;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particles * 3);
+        for(let i=0; i<particles; i++) {
+            const r = 4 * Math.cbrt(Math.random()); 
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            positions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+            positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+            positions[i*3+2] = r * Math.cos(phi);
         }
-    }, i * 250);
-});
+        
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        material = new THREE.PointsMaterial({ color: 0x00f3ff, size: 0.06, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending });
+        core = new THREE.Points(geometry, material);
+        scene.add(core);
 
-// === Clock ===
-function updateTime() {
-    const now = new Date();
-    const h = String(now.getHours()).padStart(2, '0');
-    const m = String(now.getMinutes()).padStart(2, '0');
-    const s = String(now.getSeconds()).padStart(2, '0');
-    document.getElementById('timeDisplay').textContent = `${h}:${m}:${s}`;
-}
-setInterval(updateTime, 1000);
-updateTime();
+        // Orbital Rings
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.4, side: THREE.DoubleSide });
+        ring1 = new THREE.Mesh(new THREE.TorusGeometry(6, 0.03, 16, 100), ringMat);
+        ring1.rotation.x = Math.PI / 2;
+        scene.add(ring1);
 
-// === Simulated Stats (replace with real API if desired) ===
-let uptime = 0;
-setInterval(() => {
-    uptime++;
-    document.getElementById('cpuVal').textContent = (Math.random() * 20 + 10).toFixed(1) + '%';
-    document.getElementById('memVal').textContent = (Math.random() * 30 + 20).toFixed(1) + '%';
-    const mm = String(Math.floor(uptime / 60)).padStart(2, '0');
-    const ss = String(uptime % 60).padStart(2, '0');
-    document.getElementById('uptimeVal').textContent = `00:${mm}:${ss}`;
-    document.getElementById('netIn').textContent = Math.floor(Math.random() * 500) + ' KB/s';
-    document.getElementById('netOut').textContent = Math.floor(Math.random() * 200) + ' KB/s';
-    document.getElementById('pingVal').textContent = Math.floor(Math.random() * 30 + 10) + ' ms';
-}, 1500);
+        ring2 = new THREE.Mesh(new THREE.TorusGeometry(7.5, 0.05, 16, 100), new THREE.MeshBasicMaterial({color: 0x0088ff, transparent: true, opacity: 0.3}));
+        ring2.rotation.x = Math.PI / 3;
+        scene.add(ring2);
 
-// Fetch real status periodically
-async function fetchStatus() {
-    try {
-        const r = await fetch('/api/status');
-        if (r.ok) {
-            const s = await r.json();
-            if (s.skills_loaded) document.getElementById('skillCount').textContent = 'SKILLS: ' + s.skills_loaded;
-            if (s.memory_stats) {
-                document.getElementById('epiVal').textContent = s.memory_stats.episodic_count || 0;
-                document.getElementById('semVal').textContent = s.memory_stats.semantic_count || 0;
-                document.getElementById('kgVal').textContent = s.memory_stats.knowledge_graph_nodes || 0;
+        ring3 = new THREE.Mesh(new THREE.TorusGeometry(9, 0.02, 16, 100), new THREE.MeshBasicMaterial({color: 0x00ffff, transparent: true, opacity: 0.5}));
+        ring3.rotation.y = Math.PI / 4;
+        scene.add(ring3);
+
+        camera.position.z = 14;
+        animate();
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        core.rotation.y += 0.002;
+        core.rotation.x += 0.001;
+        ring1.rotation.z += 0.005;
+        ring2.rotation.z -= 0.003;
+        ring2.rotation.x += 0.002;
+        ring3.rotation.y += 0.004;
+
+        // Smooth transitions for reactivity
+        core.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.05);
+        material.color.lerp(targetColor, 0.05);
+
+        renderer.render(scene, camera);
+    }
+
+    function setProcessingState(isProcessing) {
+        if(isProcessing) {
+            targetScale = 1.6;
+            targetColor.setHex(0xffaa00); // Gold when thinking
+        } else {
+            targetScale = 1.0;
+            targetColor.setHex(0x00f3ff); // Cyan when idle
+        }
+    }
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    initThree();
+
+    // === LIVE TELEMETRY & CLOCK ===
+    function updateClock() {
+        const now = new Date();
+        document.getElementById('clock').innerText = now.toTimeString().split(' ')[0];
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    async function fetchTelemetry() {
+        try {
+            const res = await fetch('/api/status');
+            const d = await res.json();
+            
+            document.getElementById('cpu-val').innerText = d.cpu + '%';
+            document.getElementById('cpu-bar').style.width = d.cpu + '%';
+            
+            document.getElementById('ram-val').innerText = d.ram + '%';
+            document.getElementById('ram-bar').style.width = d.ram + '%';
+            
+            document.getElementById('disk-val').innerText = d.disk + '%';
+            document.getElementById('disk-bar').style.width = d.disk + '%';
+            
+            document.getElementById('net-down').innerText = d.net_down + ' KB/s';
+            document.getElementById('net-up').innerText = d.net_up + ' KB/s';
+            
+            const h = String(Math.floor(d.uptime / 3600)).padStart(2, '0');
+            const m = String(Math.floor((d.uptime % 3600) / 60)).padStart(2, '0');
+            const s = String(d.uptime % 60).padStart(2, '0');
+            document.getElementById('uptime').innerText = `${h}:${m}:${s}`;
+            
+            if(d.skills_loaded) document.getElementById('skill-count').innerText = d.skills_loaded;
+            if(d.memory_stats) {
+                document.getElementById('mem-epi').innerText = d.memory_stats.episodic_count || 0;
+                document.getElementById('mem-sem').innerText = d.memory_stats.semantic_count || 0;
+                document.getElementById('mem-kg').innerText = d.memory_stats.knowledge_graph_nodes || 0;
             }
+        } catch(e) {}
+    }
+    setInterval(fetchTelemetry, 1500);
+    fetchTelemetry();
+
+    // === CHAT LOGIC ===
+    const chatLog = document.getElementById('chat-log');
+    const userInput = document.getElementById('user-input');
+    const intentDisplay = document.getElementById('intent-display');
+
+    function addMsg(prefix, content, type = 'rex') {
+        const div = document.createElement('div');
+        div.className = 'msg msg-' + type;
+        div.innerHTML = `<span class="prefix">[${prefix}]</span><span class="content"></span>`;
+        div.querySelector('.content').textContent = content;
+        chatLog.appendChild(div);
+        chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    async function sendMessage() {
+        const text = userInput.value.trim();
+        if (!text) return;
+        
+        addMsg('YOU', text, 'user');
+        userInput.value = '';
+        setProcessingState(true);
+        intentDisplay.textContent = 'PROCESSING NEURAL PATHWAYS...';
+        
+        try {
+            const r = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({message: text})
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            setProcessingState(false);
+            addMsg('R.E.X', data.response || 'No response', data.error ? 'error' : 'rex');
+            intentDisplay.textContent = 'INTENT: ' + (data.intent || 'GENERAL').toUpperCase();
+        } catch (err) {
+            setProcessingState(false);
+            addMsg('ERR', 'Uplink failed: ' + err.message, 'error');
+            intentDisplay.textContent = 'LINK ERROR';
         }
-    } catch(e) {}
-}
-setInterval(fetchStatus, 5000);
-fetchStatus();
-
-// === Waveform Visualizer ===
-const canvas = document.getElementById('waveform');
-const ctx = canvas.getContext('2d');
-canvas.width = 500;
-canvas.height = 40;
-let wavePhase = 0;
-let waveAmplitude = 5;
-let targetAmplitude = 5;
-
-function drawWave() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = '#00d4ff';
-    ctx.lineWidth = 1.5;
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#00d4ff';
-    ctx.beginPath();
-    waveAmplitude += (targetAmplitude - waveAmplitude) * 0.1;
-    for (let x = 0; x < canvas.width; x++) {
-        const y = canvas.height / 2 + 
-                  Math.sin((x * 0.02) + wavePhase) * waveAmplitude +
-                  Math.sin((x * 0.05) + wavePhase * 1.5) * (waveAmplitude * 0.5);
-        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
-    ctx.stroke();
-    wavePhase += 0.08;
-    requestAnimationFrame(drawWave);
-}
-drawWave();
 
-// === Chat Logic ===
-const chatMessages = document.getElementById('chatMessages');
-const userInput = document.getElementById('userInput');
-const typing = document.getElementById('typing');
-const intentDisplay = document.getElementById('intentDisplay');
-const arcReactor = document.getElementById('arcReactor');
-
-function addMsg(prefix, content, type = 'rex') {
-    const div = document.createElement('div');
-    div.className = 'msg msg-' + type;
-    const prefixText = type === 'user' ? '[YOU]> ' : type === 'error' ? '[ERR]> ' : '[R.E.X]> ';
-    div.innerHTML = `<span class="msg-prefix">${prefixText}</span><span class="msg-content"></span>`;
-    div.querySelector('.msg-content').textContent = content;
-    chatMessages.appendChild(div);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-async function sendMessage() {
-    const text = userInput.value.trim();
-    if (!text) return;
-    
-    addMsg('YOU', text, 'user');
-    userInput.value = '';
-    typing.classList.add('active');
-    targetAmplitude = 15;
-    intentDisplay.textContent = 'PROCESSING...';
-    
-    try {
-        const r = await fetch('/api/chat', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({message: text})
-        });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const data = await r.json();
-        typing.classList.remove('active');
-        targetAmplitude = 5;
-        addMsg('REX', data.response || 'No response', data.error ? 'error' : 'rex');
-        intentDisplay.textContent = 'INTENT: ' + (data.intent || 'GENERAL').toUpperCase();
-    } catch (err) {
-        typing.classList.remove('active');
-        targetAmplitude = 5;
-        addMsg('ERR', 'Connection failed: ' + err.message, 'error');
-        intentDisplay.textContent = 'LINK ERROR';
+    // === VOICE RECOGNITION ===
+    function startVoice() {
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            addMsg('ERR', 'Voice hardware unsupported.', 'error'); return;
+        }
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const rec = new SR();
+        rec.lang = 'en-IN';
+        rec.continuous = false;
+        setProcessingState(true);
+        intentDisplay.textContent = 'AUDIO RECEPTORS ACTIVE...';
+        addMsg('SYS', 'Listening...', 'rex');
+        
+        rec.onresult = (e) => {
+            userInput.value = e.results[0][0].transcript;
+            setProcessingState(false);
+            sendMessage();
+        };
+        rec.onerror = () => { setProcessingState(false); intentDisplay.textContent = 'AUDIO ERROR'; };
+        rec.onend = () => { setProcessingState(false); };
+        rec.start();
     }
-}
 
-// === Voice Recognition ===
-function startVoice() {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        addMsg('ERR', 'Voice recognition unsupported in this browser.', 'error');
-        return;
-    }
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const rec = new SR();
-    rec.lang = 'en-IN';
-    rec.continuous = false;
-    arcReactor.classList.add('active');
-    targetAmplitude = 20;
-    intentDisplay.textContent = 'LISTENING...';
-    addMsg('SYS', 'Voice channel open. Speak now.', 'rex');
-    
-    rec.onresult = (e) => {
-        const text = e.results[0][0].transcript;
-        userInput.value = text;
-        arcReactor.classList.remove('active');
-        sendMessage();
-    };
-    rec.onerror = () => {
-        arcReactor.classList.remove('active');
-        targetAmplitude = 5;
-        intentDisplay.textContent = 'VOICE ERROR';
-    };
-    rec.onend = () => {
-        arcReactor.classList.remove('active');
-        targetAmplitude = 5;
-    };
-    rec.start();
-}
-
-// Click reactor to activate voice
-arcReactor.addEventListener('click', startVoice);
-
-// Focus input on load
-setTimeout(() => userInput.focus(), bootLines.length * 250 + 1000);
+    setTimeout(() => userInput.focus(), 500);
 </script>
 </body>
 </html>
 """
-
 
 def create_web_app(engine=None):
     if not FLASK_AVAILABLE:
@@ -966,17 +666,35 @@ def create_web_app(engine=None):
     
     @app.route('/api/status', methods=['GET'])
     def status():
+        global prev_net, prev_time
+        
+        stats = {"cpu": 0, "ram": 0, "disk": 0, "net_down": 0, "net_up": 0, "uptime": 0}
+        
+        if PSUTIL_AVAILABLE:
+            current_net = psutil.net_io_counters()
+            dt = time.time() - prev_time
+            if dt > 0:
+                stats["net_down"] = round((current_net.bytes_recv - prev_net.bytes_recv) / dt / 1024, 1)
+                stats["net_up"] = round((current_net.bytes_sent - prev_net.bytes_sent) / dt / 1024, 1)
+            prev_net = current_net
+            prev_time = time.time()
+            
+            stats["cpu"] = psutil.cpu_percent(interval=0.1)
+            stats["ram"] = psutil.virtual_memory().percent
+            stats["disk"] = psutil.disk_usage('/').percent
+            stats["uptime"] = int(time.time() - START_TIME)
+            
         if engine:
-            return jsonify(engine.get_status())
-        return jsonify({"status": "standby"})
+            stats.update(engine.get_status())
+            
+        return jsonify(stats)
     
     return app
-
 
 def run_web_server(engine=None):
     app = create_web_app(engine)
     if app:
-        print(f"\n🛸 JARVIS Interface online: http://localhost:{WEB_CONFIG['port']}")
+        print(f"\n🛸 J.A.R.V.I.S. 3D Interface online: http://localhost:{WEB_CONFIG['port']}")
         app.run(
             host=WEB_CONFIG["host"],
             port=WEB_CONFIG["port"],
