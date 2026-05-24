@@ -110,7 +110,48 @@ class REXNLP:
         "percentage": r"\b\d+(?:\.\d+)?%\b",
         "number": r"\b\d+(?:\.\d+)?\b",
     }
-    
+        def __init__(self):
+        self.lemmatizer = None
+        self.stop_words = set()
+        
+        if nltk:
+            # Self-Healing: Auto-download required NLTK data if missing
+            self._ensure_nltk_data()
+            try:
+                self.lemmatizer = WordNetLemmatizer()
+                self.stop_words = set(stopwords.words('english'))
+            except Exception as e:
+                logger.warning(f"⚠️ NLTK initialization warning: {e}. Using empty fallbacks.")
+                self.stop_words = set()
+                
+        self.compiled_intents = self._compile_patterns(self.INTENT_PATTERNS)
+        self.compiled_entities = self._compile_patterns(self.ENTITY_PATTERNS)
+        
+        # Load language configs
+        self.languages = self._load_languages()
+        
+        logger.info("🗣️ NLP module initialized")
+
+    def _ensure_nltk_data(self):
+        """Self-healing: Automatically downloads missing NLTK datasets."""
+        required_datasets = [
+            ('tokenizers/punkt', 'punkt'),
+            ('corpora/stopwords', 'stopwords'),
+            ('taggers/averaged_perceptron_tagger', 'averaged_perceptron_tagger'),
+            ('chunkers/maxent_ne_chunker', 'maxent_ne_chunker'),
+            ('corpora/words', 'words'),
+            ('corpora/wordnet', 'wordnet')
+        ]
+        
+        for path, name in required_datasets:
+            try:
+                nltk.data.find(path)
+            except LookupError:
+                logger.info(f"🔄 Self-Healing: Downloading missing NLTK dataset '{name}'...")
+                try:
+                    nltk.download(name, quiet=True)
+                except Exception as e:
+                    logger.error(f"Failed to download NLTK dataset {name}: {e}")
     def __init__(self):
         self.lemmatizer = WordNetLemmatizer() if nltk else None
         self.stop_words = set(stopwords.words('english')) if nltk else set()
