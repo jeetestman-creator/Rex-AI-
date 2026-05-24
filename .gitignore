@@ -1,0 +1,87 @@
+# ==========================================
+# REX AI Assistant - .gitignore
+# ==========================================
+
+# --- Python Specific ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.manifest
+*.spec.bak
+pip-log.txt
+pip-delete-this-directory.txt
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# --- Virtual Environments ---
+venv/
+env/
+ENV/
+.venv
+env.bak/
+venv.bak/
+
+# --- REX Specific (Data, Logs, Cache, Models) ---
+# We ignore generated data, logs, and downloaded models to keep the repo clean
+data/
+logs/
+cache/
+models/
+*.log
+installer_output/
+*.mp3
+*.wav
+temp_previews/
+
+# --- IDEs and Editors ---
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# --- OS Generated Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# --- Build / Executable Artifacts ---
+*.exe
+*.dmg
+*.app
+*.deb
+*.rpm
+*.msi
+
+# --- Environment Variables / Secrets ---
+.env
+.env.local
+config/secrets.json
+*.pem
+*.key
